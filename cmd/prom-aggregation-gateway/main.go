@@ -84,13 +84,6 @@ func makeTimestampMs() int64 {
 }
 
 func mergeMetric(ty dto.MetricType, a, b *dto.Metric) *dto.Metric {
-	// Getting the metric timestamp or creating one when that metric is merged
-	// It will be used to cleanup old metrics that have not been merged lately
-	metricTimestamp := b.GetTimestampMs()
-	if metricTimestamp == 0 {
-		metricTimestamp = makeTimestampMs()
-	}
-
 	switch ty {
 	case dto.MetricType_COUNTER:
 		return &dto.Metric{
@@ -98,7 +91,7 @@ func mergeMetric(ty dto.MetricType, a, b *dto.Metric) *dto.Metric {
 			Counter: &dto.Counter{
 				Value: float64ptr(*a.Counter.Value + *b.Counter.Value),
 			},
-			TimestampMs: &metricTimestamp,
+			TimestampMs: b.TimestampMs,
 		}
 
 	case dto.MetricType_GAUGE:
@@ -110,7 +103,7 @@ func mergeMetric(ty dto.MetricType, a, b *dto.Metric) *dto.Metric {
 			Gauge: &dto.Gauge{
 				Value: float64ptr(*a.Gauge.Value + *b.Gauge.Value),
 			},
-			TimestampMs: &metricTimestamp,
+			TimestampMs: b.TimestampMs,
 		}
 
 	case dto.MetricType_HISTOGRAM:
@@ -121,7 +114,7 @@ func mergeMetric(ty dto.MetricType, a, b *dto.Metric) *dto.Metric {
 				SampleSum:   float64ptr(*a.Histogram.SampleSum + *b.Histogram.SampleSum),
 				Bucket:      mergeBuckets(a.Histogram.Bucket, b.Histogram.Bucket),
 			},
-			TimestampMs: &metricTimestamp,
+			TimestampMs: b.TimestampMs,
 		}
 
 	case dto.MetricType_UNTYPED:
@@ -130,7 +123,7 @@ func mergeMetric(ty dto.MetricType, a, b *dto.Metric) *dto.Metric {
 			Untyped: &dto.Untyped{
 				Value: float64ptr(*a.Untyped.Value + *b.Untyped.Value),
 			},
-			TimestampMs: &metricTimestamp,
+			TimestampMs: b.TimestampMs,
 		}
 
 	case dto.MetricType_SUMMARY:
@@ -239,8 +232,14 @@ func (a *aggate) parseAndMerge(r io.Reader) error {
 	a.familiesLock.Lock()
 	defer a.familiesLock.Unlock()
 	for name, family := range inFamilies {
-		// Sort labels in case source sends them inconsistently
+		// Sort labels in case source sends them inconsistently and add timestamps if needed for TTL cleanup
 		for _, m := range family.Metric {
+			metricTimestamp := m.GetTimestampMs()
+			if metricTimestamp == 0 {
+				metricTimestamp = makeTimestampMs()
+				m.TimestampMs = &metricTimestamp
+			}
+
 			sort.Sort(byName(m.Label))
 		}
 
